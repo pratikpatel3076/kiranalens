@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>KiranaLens — Cash Flow Underwriting</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e9ecf1;
+    --muted: #9aa3b2;
+    --green: #35c98f;
+    --amber: #e8b339;
+    --red: #ef5b5b;
+    --accent: #4c8dff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  #root { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .store-select {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.9; }
+  .score-badge {
+    font-size: 42px;
+    font-weight: 700;
+  }
+  .rec-pill {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+  .rec-APPROVE { background: rgba(53,201,143,0.15); color: var(--green); }
+  .rec-REVIEW { background: rgba(232,179,57,0.15); color: var(--amber); }
+  .rec-REJECT { background: rgba(239,91,91,0.15); color: var(--red); }
+  .factor { margin-bottom: 12px; }
+  .factor-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .factor-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .bar-track { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; }
+  .grid-2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+  .stat { }
+  .stat-label { font-size: 12px; color: var(--muted); }
+  .stat-value { font-size: 20px; font-weight: 600; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--muted); }
+  .tab.active { background: var(--panel-2); color: var(--text); }
+  .pitch-section { margin-bottom: 18px; }
+  .pitch-section h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+const API = "http://localhost:4000/api";
+
+function LineChart({ points, width = 640, height = 180, color = "#4c8dff" }) {
+  if (!points || points.length === 0) return null;
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const range = max - min || 1;
+  const stepX = width / (points.length - 1 || 1);
+  const path = points
+    .map((p, i) => {
+      const x = i * stepX;
+      const y = height - ((p - min) / range) * height;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const areaPath = `${path} L${width},${height} L0,${height} Z`;
+  return (
+    <svg width="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <path d={areaPath} fill={color} opacity="0.08" />
+      <path d={path} fill="none" stroke={color} strokeWidth="2" />
+    </svg>
+  );
+}
+
+function ScoreColor(score) {
+  if (score >= 70) return "var(--green)";
+  if (score >= 45) return "var(--amber)";
+  return "var(--red)";
+}
+
+function Dashboard() {
+  const [stores, setStores] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [storeData, setStoreData] = useState(null);
+  const [scoreData, setScoreData] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`${API}/stores`)
+      .then((r) => r.json())
+      .then((list) => {
+        setStores(list);
+        if (list.length) setSelectedId(list[0].storeId);
+      })
+      .catch(() => setError("Could not reach KiranaLens API. Is the server running on :4000?"));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    setLoading(true);
+    Promise.all([
+      fetch(`${API}/stores/${selectedId}`).then((r) => r.json()),
+      fetch(`${API}/stores/${selectedId}/score`).then((r) => r.json()),
+    ])
+      .then(([sd, score]) => {
+        setStoreData(sd);
+        setScoreData(score);
+        setError(null);
+      })
+      .catch(() => setError("Failed to load store data."))
+      .finally(() => setLoading(false));
+  }, [selectedId]);
+
+  const salesSeries = useMemo(
+    () => (storeData ? storeData.transactions.map((t) => t.totalAmount) : []),
+    [storeData]
+  );
+
+  function generateNewStore() {
+    fetch(`${API}/stores/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        storeName: "New Test Store " + Math.floor(Math.random() * 1000),
+        baseDailySales: Math.round(1500 + Math.random() * 6000),
+        upiAdoption: Math.round(Math.random() * 80) / 100,
+        volatility: Math.round((0.1 + Math.random() * 0.5) * 100) / 100,
+        badPatchProbability: Math.round((0.02 + Math.random() * 0.12) * 100) / 100,
+      }),
+    })
+      .then((r) => r.json())
+      .then((newStore) => {
+        setStores((prev) => [...prev, newStore]);
+        setSelectedId(newStore.storeId);
+      });
+  }
+
+  if (error) {
+    return (
+      <div className="panel" style={{ marginTop: 40 }}>
+        <strong>{error}</strong>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          Run the backend: <code>cd server && npm install && npm start</code>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1>KiranaLens</h1>
+      <div className="subtitle">Cash-flow-based credit underwriting for kirana stores</div>
+
+      <div className="row" style={{ marginBottom: 20, alignItems: "center" }}>
+        <select
+          className="store-select"
+          value={selectedId || ""}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          {stores.map((s) => (
+            <option key={s.storeId} value={s.storeId}>
+              {s.storeName}
+            </option>
+          ))}
+        </select>
+        <button onClick={generateNewStore}>+ Generate test store</button>
+      </div>
+
+      <div className="tabs">
+        <div className={`tab ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
+          Dashboard
+        </div>
+        <div className={`tab ${tab === "pitch" ? "active" : ""}`} onClick={() => setTab("pitch")}>
+          Pitch Summary
+        </div>
+      </div>
+
+      {loading && <div style={{ color: "var(--muted)" }}>Loading…</div>}
+
+      {!loading && storeData && scoreData && tab === "dashboard" && (
+        <div className="grid-2">
+          <div className="panel">
+            <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>
+              Daily sales — last {storeData.transactions.length} days
+            </h3>
+            <LineChart points={salesSeries} />
+            <div className="row" style={{ marginTop: 16, gap: 32 }}>
+              <div className="stat">
+                <div className="stat-label">Avg daily sales</div>
+                <div className="stat-value">₹{scoreData.avgDailySales.toLocaleString("en-IN")}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Est. monthly revenue</div>
+                <div className="stat-value">₹{scoreData.avgMonthlyRevenue.toLocaleString("en-IN")}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div style={{ textAlign: "center" }}>
+              <div className="score-badge" style={{ color: ScoreColor(scoreData.score) }}>
+                {scoreData.score}
+                <span style={{ fontSize: 16, color: "var(--muted)" }}>/100</span>
+              </div>
+              <div className={`rec-pill rec-${scoreData.recommendation}`}>
+                {scoreData.recommendation}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10 }}>
+                Suggested loan range
+                <br />
+                <strong style={{ color: "var(--text)" }}>
+                  ₹{scoreData.suggestedLoanRange[0].toLocaleString("en-IN")} – ₹
+                  {scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="panel" style={{ gridColumn: "1 / -1" }}>
+            <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>Score breakdown — why this score</h3>
+            {scoreData.factors.map((f) => (
+              <div className="factor" key={f.label}>
+                <div className="factor-label">
+                  <span>{f.label}</span>
+                  <span>
+                    {f.points} / {f.maxPoints} pts
+                  </span>
+                </div>
+                <div className="bar-track">
+                  <div
+                    className="bar-fill"
+                    style={{
+                      width: `${Math.max(0, (f.points / f.maxPoints) * 100)}%`,
+                      background: ScoreColor(scoreData.score),
+                    }}
+                  />
+                </div>
+                <div className="factor-detail">{f.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!loading && storeData && scoreData && tab === "pitch" && (
+        <div className="panel">
+          <div className="pitch-section">
+            <h3>Store</h3>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>{storeData.storeName}</div>
+          </div>
+          <div className="pitch-section">
+            <h3>Problem</h3>
+            <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
+              Kirana stores lack formal credit history, so traditional underwriting fails them.
+              KiranaLens infers creditworthiness from proxy signals: cash flow patterns, UPI
+              adoption, inventory turnover, and resilience to disruptions.
+            </p>
+          </div>
+          <div className="pitch-section">
+            <h3>Risk Score</h3>
+            <div style={{ fontSize: 36, fontWeight: 700, color: ScoreColor(scoreData.score) }}>
+              {scoreData.score}/100 — {scoreData.recommendation}
+            </div>
+          </div>
+          <div className="pitch-section">
+            <h3>Recommended Lending Action</h3>
+            <p style={{ color: "var(--text)" }}>
+              {scoreData.recommendation === "APPROVE" &&
+                `Approve. Suggested exposure ₹${scoreData.suggestedLoanRange[0].toLocaleString("en-IN")}–₹${scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}, sized to ~1.5–3x average monthly revenue.`}
+              {scoreData.recommendation === "REVIEW" &&
+                `Manual review recommended. If approved, cap exposure at ₹${scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}.`}
+              {scoreData.recommendation === "REJECT" &&
+                `Do not extend unsecured credit at this time. Revisit after 3+ months of stabilized cash flow.`}
+            </p>
+          </div>
+          <div className="pitch-section">
+            <h3>Key Factors</h3>
+            <ul style={{ color: "var(--muted)", lineHeight: 1.8 }}>
+              {scoreData.factors.map((f) => (
+                <li key={f.label}>
+                  {f.label}: {f.points}/{f.maxPoints} — {f.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Dashboard />);
+</script>
+</body>
+</html>
