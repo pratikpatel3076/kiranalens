@@ -8,59 +8,94 @@ history, and explains the score factor-by-factor.
 
 ```
 kiranalens/
-  server/           Express API — mock data generator + rule-based scoring engine
-    dataGenerator.js  Synthetic daily UPI+cash transactions, seasonal/weekly patterns
-    scoring.js         Explainable scoring: stability, trend, UPI adoption, resilience, restock consistency
-    index.js           REST API (in-memory store; swap for MongoDB/Mongoose for production)
+  server/
+    models/
+      Store.js          Mongoose schema — store profile, transactions[], restocks[]
+                         (subdocuments have _id suppressed)
+      StoreScore.js     Mongoose schema — cached score output, factors[], fingerprint
+                         (subdocuments have _id suppressed; top-level _id stripped from responses)
+    dataGenerator.js    Synthetic daily UPI+cash transactions, seasonal/weekly patterns
+    scoring.js          Explainable scoring: stability, trend, UPI adoption, resilience, restock consistency
+    index.js            REST API — persists to MongoDB via Mongoose, score caching with fingerprint + TTL
   client/
-    index.html        React dashboard (CDN React, no build step) — sales chart, score
-                       breakdown, pitch-summary tab for judge presentations
+    index.html          React dashboard (CDN React, no build step) — sales chart, score
+                         breakdown, pitch-summary tab for judge presentations
+  docker-compose.yml    Starts Express server + mongo:7 container, wires MONGO_URI automatically
+  .env.example          Template for local dev environment variables
 ```
 
 ## Run it
 
+### Docker (recommended)
+
 ```bash
-cd server
-npm install
-npm start          # http://localhost:4000
+docker-compose up --build
 ```
 
-Then open `client/index.html` directly in a browser (double-click it, or
-`open client/index.html`). It talks to the API at `http://localhost:4000`.
+Starts both the Express API (`http://localhost:4000`) and a `mongo:7`
+container. `MONGO_URI` is wired automatically. Mongo data persists in the
+named `mongo-data` volume. No manual DB setup required.
+
+### Local dev (without Docker)
+
+```bash
+cp .env.example .env        # fill in MONGO_URI and PORT
+cd server
+npm install
+npm start                   # http://localhost:4000
+```
+
+Then open `client/index.html` directly in a browser.
+
+`server/index.js` loads `.env` via `dotenv`, so `PORT` and `MONGO_URI` from
+`.env` apply when running outside Docker. Without a `.env`, defaults are
+`PORT=4000` and `mongodb://127.0.0.1:27017/kiranalens`.
+
+On first boot with an empty database, the server seeds three preset stores
+automatically.
 
 ## API
 
 - `GET  /api/stores` — list stores
-- `POST /api/stores/generate` — generate a new synthetic store (body: storeName, baseDailySales, upiAdoption, volatility, badPatchProbability)
+- `POST /api/stores/generate` — generate a new synthetic store
+  (body: `storeName`, `baseDailySales`, `upiAdoption`, `volatility`, `badPatchProbability`)
 - `GET  /api/stores/:id` — raw transaction data
 - `GET  /api/stores/:id/score` — risk score + factor breakdown + lending recommendation
 
-## Going to production (MERN → real M)
+## Data layer
 
-`server/index.js` uses an in-memory `Map` as the store registry so this runs
-with zero external dependencies. To swap in real MongoDB:
+Two MongoDB collections managed via Mongoose:
 
-1. Define a Mongoose schema mirroring the `generateStoreData` output shape
-   (storeId, storeName, transactions[], restocks[]).
-2. Replace the `Map` reads/writes in `index.js` with Mongoose queries.
-3. Point transaction ingestion at a real UPI/POS data source instead of
-   `dataGenerator.js`.
+- **`stores`** — store profiles with daily transaction arrays
+  (`upiAmount`, `cashAmount`, `totalAmount`, `upiTxnCount`, `cashTxnCount`)
+  and restock events. Modeled in `server/models/Store.js`.
+- **`storescores`** — cached scoring output keyed by `storeId`. Modeled in
+  `server/models/StoreScore.js`. Scores are computed by `scoring.js` on first
+  access and reused so the rule engine doesn't rerun on every
+  `GET /api/stores/:id/score`.
 
-`mongoose` is already in `package.json` for this reason.
+Cache invalidation triggers when either condition is met:
 
-## Scoring model (v1, rule-based)
+1. The store's transactions/restocks changed — detected via `dataFingerprint`
+   stored with each cached score.
+2. The cached score is older than 1 hour (TTL).
 
-Five explainable factors, 0–100 total:
-1. Revenue stability (0–30) — lower day-to-day volatility scores higher
-2. Sales trend (−10 to +20) — growing vs shrinking revenue
-3. Digital payment adoption (0–20) — UPI share, since it's verifiable/traceable
-4. Resilience to disruptions (0–20) — frequency of severe low-sales days
-5. Inventory/restock consistency (0–10) — regularity of restock intervals
+## Scoring model (rule-based, explainable)
 
-Score ≥70 → APPROVE, 45–69 → REVIEW, <45 → REJECT, with a suggested loan
-range sized off estimated monthly revenue.
+Five factors, 0–100 total:
 
-This is intentionally rule-based rather than a black-box ML model — for a
-pitch/judge context, "why this score" needs to be answerable in one sentence
-per factor. If you want to swap in a trained model later, keep the factor
-breakdown output shape so the UI doesn't need to change.
+| Factor | Range | Signal |
+|---|---|---|
+| Revenue stability | 0–30 | Lower day-to-day volatility scores higher |
+| Sales trend | −10 to +20 | Growing vs shrinking revenue over time |
+| Digital payment adoption | 0–20 | UPI share — verifiable and traceable |
+| Resilience to disruptions | 0–20 | Frequency of severe low-sales days |
+| Inventory/restock consistency | 0–10 | Regularity of restock intervals |
+
+**Score ≥ 70** → APPROVE · **45–69** → REVIEW · **< 45** → REJECT
+
+Suggested loan range is sized off estimated monthly revenue.
+
+Intentionally rule-based rather than a black-box ML model — every factor
+score is answerable in one sentence. To swap in a trained model later, keep
+the `factors[]` output shape so the dashboard doesn't need to change.
