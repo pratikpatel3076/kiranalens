@@ -87,6 +87,18 @@
   .score-card { flex: 1 1 280px; text-align: center; }
   .score-kind { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
   .score-desc { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.45; min-height: 36px; }
+  .score-note {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: rgba(232, 179, 57, 0.12);
+    border: 1px solid rgba(232, 179, 57, 0.45);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--amber);
+    line-height: 1.5;
+    text-align: left;
+  }
   .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   .breakdown-col h4 { margin: 0 0 12px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
   @media (max-width: 800px) {
@@ -129,7 +141,7 @@ function ScoreColor(score) {
   return "var(--red)";
 }
 
-function ScoreCard({ kind, kindColor, description, data }) {
+function ScoreCard({ kind, kindColor, description, data, note }) {
   if (!data) return null;
   return (
     <div className="panel score-card">
@@ -140,6 +152,7 @@ function ScoreCard({ kind, kindColor, description, data }) {
       </div>
       <div className={`rec-pill rec-${data.recommendation}`}>{data.recommendation}</div>
       <div className="score-desc">{description}</div>
+      {note && <div className="score-note">Note: {note}</div>}
       <div style={{ fontSize: 13, color: "var(--muted)" }}>
         Suggested loan range
         <br />
@@ -355,6 +368,7 @@ function Dashboard() {
               kindColor="var(--amber)"
               description={MODEL_LABEL}
               data={scoreData.modelScore}
+              note={scoreData.modelScore && scoreData.modelScore.note}
             />
           </div>
 

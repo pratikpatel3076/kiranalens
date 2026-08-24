@@ -122,5 +122,8 @@ same five signals as the rules and outputs a probability of creditworthiness
 factor labels/maxPoints as pseudo-factors so the dashboard renders both
 breakdowns identically — the two scores can legitimately disagree.
 
+This model has **not** been validated against real transaction data; treat
+its output as experimental, not a production risk estimate.
+
 Both paths share the same decision bands: **≥ 70** → APPROVE ·
 **45–69** → REVIEW · **< 45** → REJECT.
