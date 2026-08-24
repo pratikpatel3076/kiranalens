@@ -84,13 +84,21 @@
   .tab.active { background: var(--panel-2); color: var(--text); }
   .pitch-section { margin-bottom: 18px; }
   .pitch-section h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+  .score-card { flex: 1 1 280px; text-align: center; }
+  .score-kind { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .score-desc { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.45; min-height: 36px; }
+  .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .breakdown-col h4 { margin: 0 0 12px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  @media (max-width: 800px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .breakdown-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const API = "http://localhost:4000/api";
 
 function LineChart({ points, width = 640, height = 180, color = "#4c8dff" }) {
@@ -121,6 +129,61 @@ function ScoreColor(score) {
   return "var(--red)";
 }
 
+function ScoreCard({ kind, kindColor, description, data }) {
+  if (!data) return null;
+  return (
+    <div className="panel score-card">
+      <div className="score-kind" style={{ color: kindColor }}>{kind}</div>
+      <div className="score-badge" style={{ color: ScoreColor(data.score) }}>
+        {data.score}
+        <span style={{ fontSize: 16, color: "var(--muted)" }}>/100</span>
+      </div>
+      <div className={`rec-pill rec-${data.recommendation}`}>{data.recommendation}</div>
+      <div className="score-desc">{description}</div>
+      <div style={{ fontSize: 13, color: "var(--muted)" }}>
+        Suggested loan range
+        <br />
+        <strong style={{ color: "var(--text)" }}>
+          ₹{data.suggestedLoanRange[0].toLocaleString("en-IN")} – ₹
+          {data.suggestedLoanRange[1].toLocaleString("en-IN")}
+        </strong>
+      </div>
+    </div>
+  );
+}
+
+function FactorList({ factors, score }) {
+  return (
+    <>
+      {factors.map((f) => (
+        <div className="factor" key={f.label}>
+          <div className="factor-label">
+            <span>{f.label}</span>
+            <span>
+              {f.points} / {f.maxPoints} pts
+            </span>
+          </div>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{
+                width: `${Math.max(0, (f.points / f.maxPoints) * 100)}%`,
+                background: ScoreColor(score),
+              }}
+            />
+          </div>
+          <div className="factor-detail">{f.detail}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+const RULE_LABEL =
+  "Explainable baseline — five hand-tuned factors; every point is answerable in one sentence.";
+const MODEL_LABEL =
+  "Learned pattern — an ML model trained on cash-flow history; factor points are weight-derived approximations of what the model learned.";
+
 function Dashboard() {
   const [stores, setStores] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -129,6 +192,9 @@ function Dashboard() {
   const [tab, setTab] = useState("dashboard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     fetch(`${API}/stores`)
@@ -180,6 +246,26 @@ function Dashboard() {
       });
   }
 
+  function uploadFile(file) {
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    const body = new FormData();
+    body.append("file", file);
+    fetch(`${API}/stores/upload`, { method: "POST", body })
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Upload failed");
+        return data;
+      })
+      .then((newStore) => {
+        setStores((prev) => [...prev, newStore]);
+        setSelectedId(newStore.storeId);
+      })
+      .catch((e) => setUploadError(e.message))
+      .finally(() => setUploading(false));
+  }
+
   if (error) {
     return (
       <div className="panel" style={{ marginTop: 40 }}>
@@ -209,6 +295,22 @@ function Dashboard() {
           ))}
         </select>
         <button onClick={generateNewStore}>+ Generate test store</button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            uploadFile(e.target.files[0]);
+            e.target.value = "";
+          }}
+        />
+        <button onClick={() => fileInputRef.current.click()} disabled={uploading}>
+          {uploading ? "Uploading…" : "Upload export (CSV/JSON)"}
+        </button>
+        {uploadError && (
+          <span style={{ color: "var(--red)", fontSize: 13, maxWidth: 420 }}>{uploadError}</span>
+        )}
       </div>
 
       <div className="tabs">
@@ -223,68 +325,57 @@ function Dashboard() {
       {loading && <div style={{ color: "var(--muted)" }}>Loading…</div>}
 
       {!loading && storeData && scoreData && tab === "dashboard" && (
-        <div className="grid-2">
-          <div className="panel">
-            <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>
-              Daily sales — last {storeData.transactions.length} days
-            </h3>
-            <LineChart points={salesSeries} />
-            <div className="row" style={{ marginTop: 16, gap: 32 }}>
-              <div className="stat">
-                <div className="stat-label">Avg daily sales</div>
-                <div className="stat-value">₹{scoreData.avgDailySales.toLocaleString("en-IN")}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">Est. monthly revenue</div>
-                <div className="stat-value">₹{scoreData.avgMonthlyRevenue.toLocaleString("en-IN")}</div>
+        <>
+          <div className="grid-2">
+            <div className="panel">
+              <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>
+                Daily sales — last {storeData.transactions.length} days
+              </h3>
+              <LineChart points={salesSeries} />
+              <div className="row" style={{ marginTop: 16, gap: 32 }}>
+                <div className="stat">
+                  <div className="stat-label">Avg daily sales</div>
+                  <div className="stat-value">₹{scoreData.avgDailySales.toLocaleString("en-IN")}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Est. monthly revenue</div>
+                  <div className="stat-value">₹{scoreData.avgMonthlyRevenue.toLocaleString("en-IN")}</div>
+                </div>
               </div>
             </div>
+
+            <ScoreCard
+              kind="Rule-based score"
+              kindColor="var(--accent)"
+              description={RULE_LABEL}
+              data={scoreData.ruleBasedScore}
+            />
+            <ScoreCard
+              kind="Model-based score"
+              kindColor="var(--amber)"
+              description={MODEL_LABEL}
+              data={scoreData.modelScore}
+            />
           </div>
 
-          <div className="panel">
-            <div style={{ textAlign: "center" }}>
-              <div className="score-badge" style={{ color: ScoreColor(scoreData.score) }}>
-                {scoreData.score}
-                <span style={{ fontSize: 16, color: "var(--muted)" }}>/100</span>
-              </div>
-              <div className={`rec-pill rec-${scoreData.recommendation}`}>
-                {scoreData.recommendation}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10 }}>
-                Suggested loan range
-                <br />
-                <strong style={{ color: "var(--text)" }}>
-                  ₹{scoreData.suggestedLoanRange[0].toLocaleString("en-IN")} – ₹
-                  {scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}
-                </strong>
-              </div>
+          <div className="panel" style={{ marginTop: 16 }}>
+            <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>Score breakdown — why these scores</h3>
+            <div className="breakdown-grid">
+              {scoreData.ruleBasedScore && (
+                <div className="breakdown-col">
+                  <h4 style={{ color: "var(--accent)" }}>Rule-based — explainable baseline</h4>
+                  <FactorList factors={scoreData.ruleBasedScore.factors} score={scoreData.ruleBasedScore.score} />
+                </div>
+              )}
+              {scoreData.modelScore && (
+                <div className="breakdown-col">
+                  <h4 style={{ color: "var(--amber)" }}>Model-based — learned pattern</h4>
+                  <FactorList factors={scoreData.modelScore.factors} score={scoreData.modelScore.score} />
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="panel" style={{ gridColumn: "1 / -1" }}>
-            <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>Score breakdown — why this score</h3>
-            {scoreData.factors.map((f) => (
-              <div className="factor" key={f.label}>
-                <div className="factor-label">
-                  <span>{f.label}</span>
-                  <span>
-                    {f.points} / {f.maxPoints} pts
-                  </span>
-                </div>
-                <div className="bar-track">
-                  <div
-                    className="bar-fill"
-                    style={{
-                      width: `${Math.max(0, (f.points / f.maxPoints) * 100)}%`,
-                      background: ScoreColor(scoreData.score),
-                    }}
-                  />
-                </div>
-                <div className="factor-detail">{f.detail}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        </>
       )}
 
       {!loading && storeData && scoreData && tab === "pitch" && (
@@ -303,27 +394,45 @@ function Dashboard() {
           </div>
           <div className="pitch-section">
             <h3>Risk Score</h3>
-            <div style={{ fontSize: 36, fontWeight: 700, color: ScoreColor(scoreData.score) }}>
-              {scoreData.score}/100 — {scoreData.recommendation}
-            </div>
+            {scoreData.ruleBasedScore && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>RULE-BASED — EXPLAINABLE BASELINE</div>
+                <div style={{ fontSize: 36, fontWeight: 700, color: ScoreColor(scoreData.ruleBasedScore.score) }}>
+                  {scoreData.ruleBasedScore.score}/100 — {scoreData.ruleBasedScore.recommendation}
+                </div>
+              </div>
+            )}
+            {scoreData.modelScore && (
+              <div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>MODEL-BASED — LEARNED PATTERN</div>
+                <div style={{ fontSize: 36, fontWeight: 700, color: ScoreColor(scoreData.modelScore.score) }}>
+                  {scoreData.modelScore.score}/100 — {scoreData.modelScore.recommendation}
+                </div>
+              </div>
+            )}
           </div>
           <div className="pitch-section">
             <h3>Recommended Lending Action</h3>
             <p style={{ color: "var(--text)" }}>
-              {scoreData.recommendation === "APPROVE" &&
-                `Approve. Suggested exposure ₹${scoreData.suggestedLoanRange[0].toLocaleString("en-IN")}–₹${scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}, sized to ~1.5–3x average monthly revenue.`}
-              {scoreData.recommendation === "REVIEW" &&
-                `Manual review recommended. If approved, cap exposure at ₹${scoreData.suggestedLoanRange[1].toLocaleString("en-IN")}.`}
-              {scoreData.recommendation === "REJECT" &&
+              {scoreData.ruleBasedScore.recommendation === "APPROVE" &&
+                `Approve. Suggested exposure ₹${scoreData.ruleBasedScore.suggestedLoanRange[0].toLocaleString("en-IN")}–₹${scoreData.ruleBasedScore.suggestedLoanRange[1].toLocaleString("en-IN")}, sized to ~1.5–3x average monthly revenue.`}
+              {scoreData.ruleBasedScore.recommendation === "REVIEW" &&
+                `Manual review recommended. If approved, cap exposure at ₹${scoreData.ruleBasedScore.suggestedLoanRange[1].toLocaleString("en-IN")}.`}
+              {scoreData.ruleBasedScore.recommendation === "REJECT" &&
                 `Do not extend unsecured credit at this time. Revisit after 3+ months of stabilized cash flow.`}
             </p>
           </div>
           <div className="pitch-section">
             <h3>Key Factors</h3>
             <ul style={{ color: "var(--muted)", lineHeight: 1.8 }}>
-              {scoreData.factors.map((f) => (
+              {scoreData.ruleBasedScore.factors.map((f) => (
                 <li key={f.label}>
-                  {f.label}: {f.points}/{f.maxPoints} — {f.detail}
+                  Rule-based · {f.label}: {f.points}/{f.maxPoints} — {f.detail}
+                </li>
+              ))}
+              {scoreData.modelScore.factors.map((f) => (
+                <li key={"model-" + f.label}>
+                  Model-based · {f.label}: {f.points}/{f.maxPoints} — {f.detail}
                 </li>
               ))}
             </ul>

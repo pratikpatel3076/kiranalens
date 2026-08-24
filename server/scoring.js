@@ -28,7 +28,12 @@ function linearTrendSlope(values) {
   return yMean === 0 ? 0 : slope / yMean; // normalized trend
 }
 
-export function scoreStore(storeData) {
+// Shared signal extraction used by BOTH scoring paths: the rule engine
+// below and the trained model in ml/model.js consume the same five signals
+// so their outputs stay comparable factor-by-factor.
+// Returns the raw metrics plus a featureVector ordered:
+// [volatility, trend, avgUpiShare, badPatchRate, restockRegularity]
+export function computeFeatures(storeData) {
   const { transactions, restocks } = storeData;
   const totals = transactions.map((t) => t.totalAmount);
   const upiShares = transactions.map((t) =>
@@ -55,6 +60,43 @@ export function scoreStore(storeData) {
     gaps.push((restockDates[i] - restockDates[i - 1]) / 86400000);
   }
   const restockRegularity = gaps.length ? 1 - Math.min(1, stdDev(gaps) / (mean(gaps) || 1)) : 0.5;
+
+  return {
+    avgDailySales,
+    volatility,
+    trend,
+    avgUpiShare,
+    badPatchDays,
+    badPatchRate,
+    restockRegularity,
+    featureVector: [volatility, trend, avgUpiShare, badPatchRate, restockRegularity],
+  };
+}
+
+// Shared decision bands so both paths label stores identically.
+export function recommendationFor(score, avgDailySales) {
+  const monthlyRevenue = avgDailySales * 30;
+  if (score >= 70) {
+    return {
+      recommendation: "APPROVE",
+      suggestedLoanRange: [Math.round(monthlyRevenue * 1.5), Math.round(monthlyRevenue * 3)],
+    };
+  } else if (score >= 45) {
+    return {
+      recommendation: "REVIEW",
+      suggestedLoanRange: [Math.round(monthlyRevenue * 0.5), Math.round(monthlyRevenue * 1.5)],
+    };
+  }
+  return {
+    recommendation: "REJECT",
+    suggestedLoanRange: [0, Math.round(monthlyRevenue * 0.3)],
+  };
+}
+
+export function scoreStore(storeData) {
+  const feats = computeFeatures(storeData);
+  const { volatility, trend, avgUpiShare, badPatchDays, badPatchRate, restockRegularity, avgDailySales } =
+    feats;
 
   // --- Scoring factors (each explainable, sums to 0-100 base then clamped) ---
   const factors = [];
@@ -112,20 +154,8 @@ export function scoreStore(storeData) {
   const rawScore = factors.reduce((sum, f) => sum + f.points, 0);
   const score = Math.max(0, Math.min(100, rawScore));
 
-  let recommendation;
-  let suggestedLoanRange;
+  const { recommendation, suggestedLoanRange } = recommendationFor(score, avgDailySales);
   const monthlyRevenue = avgDailySales * 30;
-
-  if (score >= 70) {
-    recommendation = "APPROVE";
-    suggestedLoanRange = [Math.round(monthlyRevenue * 1.5), Math.round(monthlyRevenue * 3)];
-  } else if (score >= 45) {
-    recommendation = "REVIEW";
-    suggestedLoanRange = [Math.round(monthlyRevenue * 0.5), Math.round(monthlyRevenue * 1.5)];
-  } else {
-    recommendation = "REJECT";
-    suggestedLoanRange = [0, Math.round(monthlyRevenue * 0.3)];
-  }
 
   return {
     storeId: storeData.storeId,

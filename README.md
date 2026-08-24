@@ -16,6 +16,10 @@ kiranalens/
                          (subdocuments have _id suppressed; top-level _id stripped from responses)
     dataGenerator.js    Synthetic daily UPI+cash transactions, seasonal/weekly patterns
     scoring.js          Explainable scoring: stability, trend, UPI adoption, resilience, restock consistency
+    ml/model.js         Second scoring path: logistic regression trained at boot on synthetic stores;
+                        outputs the same factor-style breakdown via weight-derived pseudo-factors
+    normalizers/        Upload normalizers: canonical daily-aggregate CSV/JSON today; PhonePe/GPay
+                        statement formats pending a sample export (see normalizers/*.js TODOs)
     index.js            REST API — persists to MongoDB via Mongoose, score caching with fingerprint + TTL
   client/
     index.html          React dashboard (CDN React, no build step) — sales chart, score
@@ -59,8 +63,17 @@ automatically.
 - `GET  /api/stores` — list stores
 - `POST /api/stores/generate` — generate a new synthetic store
   (body: `storeName`, `baseDailySales`, `upiAdoption`, `volatility`, `badPatchProbability`)
+- `POST /api/stores/upload` — multipart upload (`file` field, CSV or JSON,
+  ≤10 MB) of a real UPI/POS export; normalized rows are stored as a NEW
+  store. Supported today: KiranaLens canonical daily-aggregate CSV
+  (`date,upiAmount,cashAmount,upiTxnCount,cashTxnCount`) and the same rows
+  as JSON. PhonePe/GPay statement normalizers are stubbed until a real
+  sample export defines their columns.
 - `GET  /api/stores/:id` — raw transaction data
-- `GET  /api/stores/:id/score` — risk score + factor breakdown + lending recommendation
+- `GET  /api/stores/:id/score` — both scores, labeled clearly:
+  `ruleBasedScore` (explainable baseline) and `modelScore` (learned
+  pattern), each with `{score, recommendation, suggestedLoanRange, factors}`;
+  plus shared `avgDailySales` / `avgMonthlyRevenue`.
 
 ## Data layer
 
@@ -70,9 +83,11 @@ Two MongoDB collections managed via Mongoose:
   (`upiAmount`, `cashAmount`, `totalAmount`, `upiTxnCount`, `cashTxnCount`)
   and restock events. Modeled in `server/models/Store.js`.
 - **`storescores`** — cached scoring output keyed by `storeId`. Modeled in
-  `server/models/StoreScore.js`. Scores are computed by `scoring.js` on first
-  access and reused so the rule engine doesn't rerun on every
-  `GET /api/stores/:id/score`.
+  `server/models/StoreScore.js`. Each cached doc holds BOTH scoring paths
+  for the same fingerprint: the rule-based result (from `scoring.js`) and
+  the ML model result (`ml/model.js`, a logistic regression trained at boot
+  on synthetic stores). Both are computed on first access and reused so
+  neither engine reruns on every `GET /api/stores/:id/score`.
 
 Cache invalidation triggers when either condition is met:
 
@@ -80,9 +95,9 @@ Cache invalidation triggers when either condition is met:
    stored with each cached score.
 2. The cached score is older than 1 hour (TTL).
 
-## Scoring model (rule-based, explainable)
+## Scoring model (two paths, same shape)
 
-Five factors, 0–100 total:
+**Rule-based (explainable baseline)** — five hand-tuned factors, 0–100 total:
 
 | Factor | Range | Signal |
 |---|---|---|
@@ -96,6 +111,16 @@ Five factors, 0–100 total:
 
 Suggested loan range is sized off estimated monthly revenue.
 
-Intentionally rule-based rather than a black-box ML model — every factor
-score is answerable in one sentence. To swap in a trained model later, keep
-the `factors[]` output shape so the dashboard doesn't need to change.
+Intentionally rule-based — every factor score is answerable in one sentence.
+
+**Model-based (learned pattern)** — a logistic regression (`ml/model.js`)
+trained at server boot on ~500 synthetic KiranaLens stores, labeled by the
+generator's latent parameters (volatility, bad-patch probability, UPI
+adoption, revenue scale) rather than by the rule engine. It consumes the
+same five signals as the rules and outputs a probability of creditworthiness
+(×100 = score). Its per-feature weights are projected onto the same five
+factor labels/maxPoints as pseudo-factors so the dashboard renders both
+breakdowns identically — the two scores can legitimately disagree.
+
+Both paths share the same decision bands: **≥ 70** → APPROVE ·
+**45–69** → REVIEW · **< 45** → REJECT.

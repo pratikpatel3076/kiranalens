@@ -17,6 +17,19 @@ const storeScoreSchema = new mongoose.Schema(
     recommendation: { type: String, required: true },
     suggestedLoanRange: { type: [Number], required: true },
     factors: { type: [factorSchema], default: [] },
+    model: {
+      type: new mongoose.Schema(
+        {
+          score: { type: Number, required: true },
+          recommendation: { type: String, required: true },
+          suggestedLoanRange: { type: [Number], required: true },
+          factors: { type: [factorSchema], default: [] },
+          computedAt: { type: Date, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
     avgDailySales: { type: Number, required: true },
     avgMonthlyRevenue: { type: Number, required: true },
     dataFingerprint: { type: String },
