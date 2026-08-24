@@ -63,6 +63,7 @@ export function computeFeatures(storeData) {
 
   return {
     avgDailySales,
+    dayCount: totals.length,
     volatility,
     trend,
     avgUpiShare,
@@ -95,8 +96,16 @@ export function recommendationFor(score, avgDailySales) {
 
 export function scoreStore(storeData) {
   const feats = computeFeatures(storeData);
-  const { volatility, trend, avgUpiShare, badPatchDays, badPatchRate, restockRegularity, avgDailySales } =
-    feats;
+  const {
+    volatility,
+    trend,
+    avgUpiShare,
+    badPatchDays,
+    badPatchRate,
+    restockRegularity,
+    avgDailySales,
+    dayCount,
+  } = feats;
 
   // --- Scoring factors (each explainable, sums to 0-100 base then clamped) ---
   const factors = [];
@@ -135,7 +144,7 @@ export function scoreStore(storeData) {
   const resiliencePts = Math.round(Math.max(0, 20 * (1 - Math.min(1, badPatchRate / 0.15))));
   factors.push({
     label: "Resilience to disruptions",
-    detail: `${badPatchDays} severe low-sales day(s) out of ${totals.length} (${(
+    detail: `${badPatchDays} severe low-sales day(s) out of ${dayCount} (${(
       badPatchRate * 100
     ).toFixed(1)}%)`,
     points: resiliencePts,

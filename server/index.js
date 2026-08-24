@@ -10,6 +10,7 @@ import { trainModel, scoreWithModel, MODEL_SCORE_NOTE } from "./ml/model.js";
 import Store from "./models/Store.js";
 import StoreScore from "./models/StoreScore.js";
 import { normalizeRows, aggregateDaily, UploadError } from "./normalizers/index.js";
+import { gpay } from "./normalizers/gpay.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -105,9 +106,10 @@ function parseCsvUpload(text) {
   return normalizeRows(Object.keys(records[0]), records);
 }
 
-// Accepts a real UPI/POS export (CSV) or pre-normalized daily rows (JSON),
+// Accepts a real UPI/POS export — CSV, JSON, or a Google Pay statement PDF —
 // normalizes it into KiranaLens daily transactions and stores it as a NEW
-// store. Vendor formats (PhonePe, GPay) plug into normalizers/.
+// store. CSV is routed by header detection (normalizers/); GPay PDFs get a
+// dedicated extractor.
 app.post("/api/stores/upload", upload.single("file"), async (req, res, next) => {
   try {
     if (!req.file) throw new UploadError(400, 'Multipart file field "file" is required');
@@ -115,7 +117,16 @@ app.post("/api/stores/upload", upload.single("file"), async (req, res, next) => 
     const text = req.file.buffer.toString("utf8");
     const isJson =
       /\.json$/i.test(req.file.originalname) || String(req.file.mimetype || "").includes("json");
-    const transactions = isJson ? parseJsonUpload(text) : parseCsvUpload(text);
+
+    let transactions;
+    let uploadStats = {};
+    if (gpay.matchesFilename(req.file.originalname, req.file.mimetype)) {
+      ({ transactions, ...uploadStats } = await gpay.normalizeFromPdf(req.file.buffer));
+    } else if (isJson) {
+      transactions = parseJsonUpload(text);
+    } else {
+      transactions = parseCsvUpload(text);
+    }
 
     const storeId = "UP-" + Math.floor(Math.random() * 100000);
     const fallbackName = req.file.originalname.replace(/\.[^.]+$/, "") || "Uploaded store";
@@ -129,7 +140,7 @@ app.post("/api/stores/upload", upload.single("file"), async (req, res, next) => 
       restocks: [], // real exports carry no restock events
     });
 
-    res.json({ storeId, storeName, days: transactions.length });
+    res.json({ storeId, storeName, days: transactions.length, ...uploadStats });
   } catch (err) {
     next(err);
   }

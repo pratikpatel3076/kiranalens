@@ -1,14 +1,9 @@
 // Shared helpers + format registry for transaction-history uploads.
+import { UploadError } from "./errors.js";
+
+export { UploadError };
 
 export const MAX_UPLOAD_ROWS = 100000;
-
-export class UploadError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-    this.expose = true;
-  }
-}
 
 const REQUIRED_FIELDS = ["date", "upiAmount", "cashAmount"];
 

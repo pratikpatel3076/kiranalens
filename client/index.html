@@ -311,7 +311,7 @@ function Dashboard() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv,.json"
+          accept=".csv,.json,.pdf"
           style={{ display: "none" }}
           onChange={(e) => {
             uploadFile(e.target.files[0]);
@@ -319,7 +319,7 @@ function Dashboard() {
           }}
         />
         <button onClick={() => fileInputRef.current.click()} disabled={uploading}>
-          {uploading ? "Uploading…" : "Upload export (CSV/JSON)"}
+          {uploading ? "Uploading…" : "Upload export (CSV/JSON/PDF)"}
         </button>
         {uploadError && (
           <span style={{ color: "var(--red)", fontSize: 13, maxWidth: 420 }}>{uploadError}</span>

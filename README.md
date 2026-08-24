@@ -18,8 +18,8 @@ kiranalens/
     scoring.js          Explainable scoring: stability, trend, UPI adoption, resilience, restock consistency
     ml/model.js         Second scoring path: logistic regression trained at boot on synthetic stores;
                         outputs the same factor-style breakdown via weight-derived pseudo-factors
-    normalizers/        Upload normalizers: canonical daily-aggregate CSV/JSON today; PhonePe/GPay
-                        statement formats pending a sample export (see normalizers/*.js TODOs)
+    normalizers/        Upload normalizers: canonical daily-aggregate CSV/JSON, Google Pay
+                        "Get Statement" PDF; PhonePe pending a sample export (TODO stub)
     index.js            REST API — persists to MongoDB via Mongoose, score caching with fingerprint + TTL
   client/
     index.html          React dashboard (CDN React, no build step) — sales chart, score
@@ -63,12 +63,18 @@ automatically.
 - `GET  /api/stores` — list stores
 - `POST /api/stores/generate` — generate a new synthetic store
   (body: `storeName`, `baseDailySales`, `upiAdoption`, `volatility`, `badPatchProbability`)
-- `POST /api/stores/upload` — multipart upload (`file` field, CSV or JSON,
-  ≤10 MB) of a real UPI/POS export; normalized rows are stored as a NEW
-  store. Supported today: KiranaLens canonical daily-aggregate CSV
-  (`date,upiAmount,cashAmount,upiTxnCount,cashTxnCount`) and the same rows
-  as JSON. PhonePe/GPay statement normalizers are stubbed until a real
-  sample export defines their columns.
+- `POST /api/stores/upload` — multipart upload (`file` field, CSV, JSON or
+  PDF, ≤10 MB) of a real UPI/POS export; normalized rows are stored as a NEW
+  store. Supported today:
+  - KiranaLens canonical daily-aggregate CSV
+    (`date,upiAmount,cashAmount,upiTxnCount,cashTxnCount`) and the same rows
+    as JSON.
+  - Google Pay "Get Statement" PDF (`server/normalizers/gpay.js`). The GPay
+    export has no direction column — direction is parsed from the statement
+    text ("Received from" vs "Paid to"); only received rows count as store
+    revenue, paid-out rows are tallied and excluded. Bank names, account
+    digits and UPI transaction IDs are never stored or logged.
+  PhonePe statement import is not wired yet — paste a sample export to add it.
 - `GET  /api/stores/:id` — raw transaction data
 - `GET  /api/stores/:id/score` — both scores, labeled clearly:
   `ruleBasedScore` (explainable baseline) and `modelScore` (learned
