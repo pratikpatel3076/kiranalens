@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 import multer from "multer";
+import { streamNarrative } from "./ai/narrative.js";
+import { generateAlert } from "./ai/alert.js";
 import { parse as csvParse } from "csv-parse/sync";
 import { generateStoreData } from "./dataGenerator.js";
 import { scoreStore } from "./scoring.js";
@@ -187,18 +189,43 @@ app.get("/api/stores/:id/score", async (req, res, next) => {
     const cached = await StoreScore.findOne({ storeId: store.storeId });
     const cacheFresh =
       cached &&
-      cached.model && // pre-dual-score cache entries are treated as stale
+      cached.model &&
       cached.dataFingerprint === fingerprint &&
       Date.now() - new Date(cached.computedAt).getTime() < SCORE_CACHE_TTL_MS;
 
     if (cacheFresh) {
-      return res.json(scoreResponse(store.storeName, cached));
+      return res.json({
+        ...scoreResponse(store.storeName, cached),
+        latestAlert: cached.latestAlert || null,
+      });
     }
 
     const result = scoreStore(store.toObject());
     const modelResult = scoreWithModel(store.toObject());
 
     const doc = cached || new StoreScore({ storeId: store.storeId });
+
+    // Record history entry + generate alert if score dropped significantly
+    let alertText = null;
+    if (cached && cached.score != null) {
+      alertText = await generateAlert(
+        store.storeName,
+        { score: cached.score, recommendation: cached.recommendation },
+        { score: result.score, recommendation: result.recommendation, factors: result.factors }
+      );
+    }
+
+    doc.history = doc.history || [];
+    doc.history.push({
+      score: result.score,
+      recommendation: result.recommendation,
+      computedAt: new Date(),
+      alertGenerated: alertText || null,
+    });
+    // Keep history trimmed to last 30 entries
+    if (doc.history.length > 30) doc.history = doc.history.slice(-30);
+
+    doc.latestAlert = alertText || null;
     doc.score = result.score;
     doc.recommendation = result.recommendation;
     doc.suggestedLoanRange = result.suggestedLoanRange;
@@ -232,11 +259,46 @@ app.get("/api/stores/:id/score", async (req, res, next) => {
         recommendation: modelResult.recommendation,
         suggestedLoanRange: modelResult.suggestedLoanRange,
         factors: modelResult.factors,
-        note: modelResult.note,
+        note: MODEL_SCORE_NOTE,
       },
+      latestAlert: alertText || null,
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get("/api/stores/:id/narrative", async (req, res, next) => {
+  try {
+    const store = await Store.findOne({ storeId: req.params.id });
+    if (!store) return res.status(404).json({ error: "Store not found" });
+
+    const cached = await StoreScore.findOne({ storeId: req.params.id });
+    if (!cached)
+      return res
+        .status(400)
+        .json({ error: "Score not computed yet — call /score first." });
+
+    const scoreData = {
+      avgDailySales: cached.avgDailySales,
+      avgMonthlyRevenue: cached.avgMonthlyRevenue,
+      ruleBasedScore: {
+        score: cached.score,
+        recommendation: cached.recommendation,
+        suggestedLoanRange: cached.suggestedLoanRange,
+        factors: cached.factors,
+      },
+      modelScore: {
+        score: cached.model.score,
+        recommendation: cached.model.recommendation,
+        suggestedLoanRange: cached.model.suggestedLoanRange,
+        factors: cached.model.factors,
+      },
+    };
+
+    await streamNarrative(store.storeName, scoreData, res);
+  } catch (err) {
+    if (!res.headersSent) next(err);
   }
 });
 

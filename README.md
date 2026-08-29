@@ -20,10 +20,14 @@ kiranalens/
                         outputs the same factor-style breakdown via weight-derived pseudo-factors
     normalizers/        Upload normalizers: canonical daily-aggregate CSV/JSON, Google Pay
                         "Get Statement" PDF; PhonePe pending a sample export (TODO stub)
+    ai/
+      narrative.js      Groq streaming SSE credit narrative (buildPrompt, streamNarrative)
+      alert.js          Groq alert generation when the recommended score drops 8+ points
     index.js            REST API — persists to MongoDB via Mongoose, score caching with fingerprint + TTL
   client/
     index.html          React dashboard (CDN React, no build step) — sales chart, score
-                         breakdown, pitch-summary tab for judge presentations
+                        breakdown, pitch-summary tab, AI Analysis tab with live streaming
+                        narrative and blinking cursor
   docker-compose.yml    Starts Express server + mongo:7 container, wires MONGO_URI automatically
   .env.example          Template for local dev environment variables
 ```
@@ -43,10 +47,10 @@ named `mongo-data` volume. No manual DB setup required.
 ### Local dev (without Docker)
 
 ```bash
-cp .env.example .env        # fill in MONGO_URI and PORT
 cd server
+cp .env.example .env   # set GROQ_API_KEY; if not using Docker, change MONGO_URI
 npm install
-npm start                   # http://localhost:4000
+npm start                  # http://localhost:4000
 ```
 
 Then open `client/index.html` directly in a browser.
@@ -54,6 +58,13 @@ Then open `client/index.html` directly in a browser.
 `server/index.js` loads `.env` via `dotenv`, so `PORT` and `MONGO_URI` from
 `.env` apply when running outside Docker. Without a `.env`, defaults are
 `PORT=4000` and `mongodb://127.0.0.1:27017/kiranalens`.
+
+Note: `.env.example` ships with the Docker Compose hostname
+(`mongodb://mongo:27017/kiranalens`), which only resolves inside Docker. For
+local dev, change it to `mongodb://127.0.0.1:27017/kiranalens` and keep a
+local MongoDB running on 27017. The AI narrative/alert features need a
+`GROQ_API_KEY`; under Docker it must be added to the server service in
+`docker-compose.yml` (it is not wired to the host `.env` automatically).
 
 On first boot with an empty database, the server seeds three preset stores
 automatically.
@@ -80,6 +91,9 @@ automatically.
   `ruleBasedScore` (explainable baseline) and `modelScore` (learned
   pattern), each with `{score, recommendation, suggestedLoanRange, factors}`;
   plus shared `avgDailySales` / `avgMonthlyRevenue`.
+- `GET  /api/stores/:id/narrative` — Server-Sent Events (SSE) stream of an
+  AI credit narrative via Groq (`data: {"text": "chunk"}` until `data: [DONE]`);
+  returns 400 if the store has not been scored yet.
 
 ## Data layer
 

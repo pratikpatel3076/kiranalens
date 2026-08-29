@@ -10,6 +10,16 @@ const factorSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const historyEntrySchema = new mongoose.Schema(
+  {
+    score: { type: Number, required: true },
+    recommendation: { type: String, required: true },
+    computedAt: { type: Date, required: true },
+    alertGenerated: { type: String, default: null },
+  },
+  { _id: false }
+);
+
 const storeScoreSchema = new mongoose.Schema(
   {
     storeId: { type: String, required: true, unique: true },
@@ -34,6 +44,8 @@ const storeScoreSchema = new mongoose.Schema(
     avgMonthlyRevenue: { type: Number, required: true },
     dataFingerprint: { type: String },
     computedAt: { type: Date, required: true },
+    history: { type: [historyEntrySchema], default: [] },
+    latestAlert: { type: String, default: null },
   },
   {
     versionKey: false,

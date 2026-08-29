@@ -105,6 +105,46 @@
     .grid-2 { grid-template-columns: 1fr; }
     .breakdown-grid { grid-template-columns: 1fr; }
   }
+  .narrative-box {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+}
+.narrative-box h2 {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  margin: 22px 0 8px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.narrative-box ol {
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.9;
+}
+.cursor-blink {
+  display: inline-block;
+  width: 2px;
+  height: 13px;
+  background: var(--accent);
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+  vertical-align: middle;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.alert-banner {
+  background: rgba(239,91,91,0.08);
+  border: 1px solid rgba(239,91,91,0.35);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--red);
+  line-height: 1.6;
+}
 </style>
 </head>
 <body>
@@ -208,6 +248,42 @@ function Dashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
+  const [narrative, setNarrative] = useState("");
+const [narrativeLoading, setNarrativeLoading] = useState(false);
+const esRef = useRef(null);
+
+function fetchNarrative() {
+  if (esRef.current) esRef.current.close();
+  setNarrative("");
+  setNarrativeLoading(true);
+  const es = new EventSource(`${API}/stores/${selectedId}/narrative`);
+  esRef.current = es;
+  es.onmessage = (e) => {
+    if (e.data === "[DONE]") {
+      es.close();
+      setNarrativeLoading(false);
+      return;
+    }
+    try {
+      const { text, error } = JSON.parse(e.data);
+      if (error) {
+        setNarrative("Error: " + error);
+        es.close();
+        setNarrativeLoading(false);
+        return;
+      }
+      setNarrative((prev) => prev + text);
+    } catch {}
+  };
+  es.onerror = () => { es.close(); setNarrativeLoading(false); };
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/^(\d+\.)/gm, "<br/>$1");
+}
 
   useEffect(() => {
     fetch(`${API}/stores`)
@@ -327,11 +403,10 @@ function Dashboard() {
       </div>
 
       <div className="tabs">
-        <div className={`tab ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
-          Dashboard
-        </div>
-        <div className={`tab ${tab === "pitch" ? "active" : ""}`} onClick={() => setTab("pitch")}>
-          Pitch Summary
+        <div className={`tab ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>Dashboard</div>
+        <div className={`tab ${tab === "pitch" ? "active" : ""}`} onClick={() => setTab("pitch")}>Pitch Summary</div>
+        <div className={`tab ${tab === "ai" ? "active" : ""}`} onClick={() => setTab("ai")}>
+          AI Analysis {narrative && <span style={{ color: "var(--green)", marginLeft: 4 }}>●</span>}
         </div>
       </div>
 
@@ -339,6 +414,11 @@ function Dashboard() {
 
       {!loading && storeData && scoreData && tab === "dashboard" && (
         <>
+          {scoreData.latestAlert && (
+            <div className="alert-banner">
+              ⚠ Score Alert: {scoreData.latestAlert}
+            </div>
+          )}
           <div className="grid-2">
             <div className="panel">
               <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--muted)" }}>
@@ -451,6 +531,46 @@ function Dashboard() {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {!loading && storeData && scoreData && tab === "ai" && (
+        <div className="panel">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 20,
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>AI Credit Narrative</div>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                Powered by Groq GPT-OSS · {storeData.storeName}
+              </div>
+            </div>
+            <button onClick={fetchNarrative} disabled={narrativeLoading}>
+              {narrativeLoading ? "Generating…" : narrative ? "Regenerate" : "Generate Analysis"}
+            </button>
+          </div>
+
+          {!narrative && !narrativeLoading && (
+            <div style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", padding: "40px 0" }}>
+              Click "Generate Analysis" to get an AI-powered risk narrative, merchant explanation, and improvement actions.
+            </div>
+          )}
+
+          {(narrative || narrativeLoading) && (
+            <div
+              className="narrative-box"
+              dangerouslySetInnerHTML={{
+                __html:
+                  renderMarkdown(narrative) +
+                  (narrativeLoading ? '<span class="cursor-blink"></span>' : ""),
+              }}
+            />
+          )}
         </div>
       )}
     </div>

@@ -12,6 +12,7 @@
     "csv-parse": "^7.0.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "groq-sdk": "^1.6.0",
     "ml-logistic-regression": "^2.0.0",
     "ml-matrix": "^6.15.0",
     "mongoose": "^8.5.0",
