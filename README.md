@@ -1,37 +1,31 @@
 # KiranaLens
 
-Fintech cash-flow underwriting tool for kirana (small Indian retail) stores.
-Estimates lending risk from transaction patterns instead of formal credit
-history, and explains the score factor-by-factor.
+> **Razorpay AI Buildathon — AI Risk Manager track**
+
+AI-powered cash-flow credit underwriting for kirana (small Indian retail) stores.
+Scores lending risk from UPI + cash transaction patterns instead of formal credit history,
+generates streaming AI narratives for lenders and store owners via Groq, and alerts
+when a store's financial health degrades — no formal credit history required.
+
 ![AI narrative streaming live](docs/demo.png)
 
-## Structure
+## What it does
 
-```
-kiranalens/
-  server/
-    models/
-      Store.js          Mongoose schema — store profile, transactions[], restocks[]
-                         (subdocuments have _id suppressed)
-      StoreScore.js     Mongoose schema — cached score output, factors[], fingerprint
-                         (subdocuments have _id suppressed; top-level _id stripped from responses)
-    dataGenerator.js    Synthetic daily UPI+cash transactions, seasonal/weekly patterns
-    scoring.js          Explainable scoring: stability, trend, UPI adoption, resilience, restock consistency
-    ml/model.js         Second scoring path: logistic regression trained at boot on synthetic stores;
-                        outputs the same factor-style breakdown via weight-derived pseudo-factors
-    normalizers/        Upload normalizers: canonical daily-aggregate CSV/JSON, Google Pay
-                        "Get Statement" PDF; PhonePe pending a sample export (TODO stub)
-    ai/
-      narrative.js      Groq streaming SSE credit narrative (buildPrompt, streamNarrative)
-      alert.js          Groq alert generation when the recommended score drops 8+ points
-    index.js            REST API — persists to MongoDB via Mongoose, score caching with fingerprint + TTL
-  client/
-    index.html          React dashboard (CDN React, no build step) — sales chart, score
-                        breakdown, pitch-summary tab, AI Analysis tab with live streaming
-                        narrative and blinking cursor
-  docker-compose.yml    Starts Express server + mongo:7 container, wires MONGO_URI automatically
-  .env.example          Template for local dev environment variables
-```
+- Ingests 6–12 months of daily transaction data (synthetic generator, CSV, JSON, or Google Pay PDF export)
+- Runs two independent scoring paths: explainable rule-based engine + logistic regression ML model trained at boot
+- Streams an AI credit narrative via Groq (Llama 3.3 70B): lender brief, plain-language merchant explanation, and 3 specific improvement actions
+- Automatically generates alerts when a store's score drops 8+ points between evaluations
+- Persists all scores, history, and alerts in MongoDB with fingerprint-based cache invalidation
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Node.js + Express (ESM), Mongoose + MongoDB |
+| ML | In-process logistic regression trained on synthetic stores at boot |
+| AI | Groq API — llama-3.3-70b-versatile — streaming SSE |
+| Frontend | Single-file React dashboard (CDN, no build step) |
+| Infra | Docker Compose (Express + mongo:7) |
 
 ## Run it
 
@@ -46,80 +40,60 @@ docker-compose up --build
 GROQ_API_KEY=your_groq_key_here docker-compose up --build
 ```
 
+Then open `client/index.html` in a browser. Three stores are seeded automatically on first boot.
+
 ### Local dev (without Docker)
 
 ```bash
 cd server
-cp .env.example .env   # set GROQ_API_KEY; if not using Docker, change MONGO_URI
+cp .env.example .env    # add your GROQ_API_KEY and set MONGO_URI to localhost
 npm install
-npm start                  # http://localhost:4000
+npm start               # http://localhost:4000
 ```
 
 Then open `client/index.html` directly in a browser.
 
-`server/index.js` loads `.env` via `dotenv`, so `PORT` and `MONGO_URI` from
-`.env` apply when running outside Docker. Without a `.env`, defaults are
-`PORT=4000` and `mongodb://127.0.0.1:27017/kiranalens`.
-
-Note: `.env.example` ships with the Docker Compose hostname
-(`mongodb://mongo:27017/kiranalens`), which only resolves inside Docker. For
-local dev, change it to `mongodb://127.0.0.1:27017/kiranalens` and keep a
-local MongoDB running on 27017. The AI narrative/alert features need a
-`GROQ_API_KEY`; under Docker it must be added to the server service in
-`docker-compose.yml` (it is not wired to the host `.env` automatically).
-
-On first boot with an empty database, the server seeds three preset stores
-automatically.
-
 ## API
 
-- `GET  /api/stores` — list stores
-- `POST /api/stores/generate` — generate a new synthetic store
-  (body: `storeName`, `baseDailySales`, `upiAdoption`, `volatility`, `badPatchProbability`)
-- `POST /api/stores/upload` — multipart upload (`file` field, CSV, JSON or
-  PDF, ≤10 MB) of a real UPI/POS export; normalized rows are stored as a NEW
-  store. Supported today:
-  - KiranaLens canonical daily-aggregate CSV
-    (`date,upiAmount,cashAmount,upiTxnCount,cashTxnCount`) and the same rows
-    as JSON.
-  - Google Pay "Get Statement" PDF (`server/normalizers/gpay.js`). The GPay
-    export has no direction column — direction is parsed from the statement
-    text ("Received from" vs "Paid to"); only received rows count as store
-    revenue, paid-out rows are tallied and excluded. Bank names, account
-    digits and UPI transaction IDs are never stored or logged.
-  PhonePe statement import is not wired yet — paste a sample export to add it.
-- `GET  /api/stores/:id` — raw transaction data
-- `GET  /api/stores/:id/score` — both scores, labeled clearly:
-  `ruleBasedScore` (explainable baseline) and `modelScore` (learned
-  pattern), each with `{score, recommendation, suggestedLoanRange, factors}`;
-  plus shared `avgDailySales` / `avgMonthlyRevenue`.
-- `GET  /api/stores/:id/narrative` — Server-Sent Events (SSE) stream of an
-  AI credit narrative via Groq (`data: {"text": "chunk"}` until `data: [DONE]`);
-  returns 400 if the store has not been scored yet.
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/stores` | List all stores |
+| POST | `/api/stores/generate` | Generate a synthetic store |
+| POST | `/api/stores/upload` | Upload a real export (CSV, JSON, GPay PDF ≤10 MB) |
+| GET | `/api/stores/:id` | Raw transaction data |
+| GET | `/api/stores/:id/score` | Dual score — rule-based + ML model |
+| GET | `/api/stores/:id/narrative` | SSE stream — AI credit narrative via Groq |
 
-## Data layer
+### Upload formats supported
 
-Two MongoDB collections managed via Mongoose:
+- KiranaLens canonical daily-aggregate CSV (`date,upiAmount,cashAmount,upiTxnCount,cashTxnCount`)
+- Same schema as JSON
+- Google Pay "Get Statement" PDF — direction parsed from statement text ("Received from" vs "Paid to"); only inbound rows count as revenue. Bank names, account digits and UPI IDs are never stored or logged.
 
-- **`stores`** — store profiles with daily transaction arrays
-  (`upiAmount`, `cashAmount`, `totalAmount`, `upiTxnCount`, `cashTxnCount`)
-  and restock events. Modeled in `server/models/Store.js`.
-- **`storescores`** — cached scoring output keyed by `storeId`. Modeled in
-  `server/models/StoreScore.js`. Each cached doc holds BOTH scoring paths
-  for the same fingerprint: the rule-based result (from `scoring.js`) and
-  the ML model result (`ml/model.js`, a logistic regression trained at boot
-  on synthetic stores). Both are computed on first access and reused so
-  neither engine reruns on every `GET /api/stores/:id/score`.
+### Score response shape
 
-Cache invalidation triggers when either condition is met:
+```json
+{
+  "ruleBasedScore": { "score": 74, "recommendation": "APPROVE", "suggestedLoanRange": [64000, 192000], "factors": [] },
+  "modelScore":     { "score": 100, "recommendation": "APPROVE", "suggestedLoanRange": [64000, 192000], "factors": [] },
+  "avgDailySales": 4268,
+  "avgMonthlyRevenue": 128039,
+  "latestAlert": null
+}
+```
 
-1. The store's transactions/restocks changed — detected via `dataFingerprint`
-   stored with each cached score.
-2. The cached score is older than 1 hour (TTL).
+### Narrative SSE format
 
-## Scoring model (two paths, same shape)
+```
+data: {"text": "chunk"}   ← repeated
+data: [DONE]              ← stream end
+```
 
-**Rule-based (explainable baseline)** — five hand-tuned factors, 0–100 total:
+## Scoring — two independent paths, same output shape
+
+### Rule-based (explainable baseline)
+
+Five hand-tuned factors, 0–100 total:
 
 | Factor | Range | Signal |
 |---|---|---|
@@ -129,23 +103,43 @@ Cache invalidation triggers when either condition is met:
 | Resilience to disruptions | 0–20 | Frequency of severe low-sales days |
 | Inventory/restock consistency | 0–10 | Regularity of restock intervals |
 
-**Score ≥ 70** → APPROVE · **45–69** → REVIEW · **< 45** → REJECT
+Every factor score is answerable in one sentence — designed for explainability in a judge/underwriter context.
+
+### Model-based (learned pattern)
+
+Logistic regression trained at server boot on ~500 synthetic stores, labeled by the generator's latent parameters (volatility, bad-patch probability, UPI adoption, revenue scale) — independent of the rule engine, so the two scores can legitimately disagree.
+
+Per-feature weights are projected onto the same five factor labels so both breakdowns render identically in the dashboard.
+
+> This model has not been validated against real transaction data. Treat its output as experimental.
+
+### Decision bands (both paths)
+
+**≥ 70** → APPROVE · **45–69** → REVIEW · **< 45** → REJECT
 
 Suggested loan range is sized off estimated monthly revenue.
 
-Intentionally rule-based — every factor score is answerable in one sentence.
+## Structure
 
-**Model-based (learned pattern)** — a logistic regression (`ml/model.js`)
-trained at server boot on ~500 synthetic KiranaLens stores, labeled by the
-generator's latent parameters (volatility, bad-patch probability, UPI
-adoption, revenue scale) rather than by the rule engine. It consumes the
-same five signals as the rules and outputs a probability of creditworthiness
-(×100 = score). Its per-feature weights are projected onto the same five
-factor labels/maxPoints as pseudo-factors so the dashboard renders both
-breakdowns identically — the two scores can legitimately disagree.
-
-This model has **not** been validated against real transaction data; treat
-its output as experimental, not a production risk estimate.
-
-Both paths share the same decision bands: **≥ 70** → APPROVE ·
-**45–69** → REVIEW · **< 45** → REJECT.
+```
+kiranalens/
+  server/
+    models/
+      Store.js          Mongoose schema — store profile, transactions[], restocks[]
+      StoreScore.js     Mongoose schema — cached scores, history[], latestAlert
+    dataGenerator.js    Synthetic daily UPI+cash transactions with seasonal/weekly patterns
+    scoring.js          Rule-based scoring (exports computeFeatures for ML reuse)
+    ml/
+      model.js          Logistic regression — trained at boot, independent of rule engine
+    ai/
+      narrative.js      Groq streaming SSE narrative (buildPrompt, streamNarrative)
+      alert.js          Groq alert generation when score drops 8+ points
+    normalizers/
+      index.js          CSV/JSON upload router — header detection + daily aggregation
+      gpay.js           Google Pay PDF parser (pdfjs-dist, geometric table reconstruction)
+    index.js            Express API — all routes, MongoDB connect, ML training at boot
+  client/
+    index.html          React dashboard — Dashboard / Pitch Summary / AI Analysis tabs
+  docker-compose.yml    Express + mongo:7, GROQ_API_KEY wired from host environment
+  .env.example          Environment variable template
+```
