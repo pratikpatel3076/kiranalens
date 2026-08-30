@@ -37,12 +37,13 @@ kiranalens/
 ### Docker (recommended)
 
 ```bash
+# Windows PowerShell
+$env:GROQ_API_KEY="your_groq_key_here"
 docker-compose up --build
-```
 
-Starts both the Express API (`http://localhost:4000`) and a `mongo:7`
-container. `MONGO_URI` is wired automatically. Mongo data persists in the
-named `mongo-data` volume. No manual DB setup required.
+# Mac/Linux
+GROQ_API_KEY=your_groq_key_here docker-compose up --build
+```
 
 ### Local dev (without Docker)
 
