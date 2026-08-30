@@ -3,6 +3,7 @@
 Fintech cash-flow underwriting tool for kirana (small Indian retail) stores.
 Estimates lending risk from transaction patterns instead of formal credit
 history, and explains the score factor-by-factor.
+![AI narrative streaming live](docs/demo.png)
 
 ## Structure
 
