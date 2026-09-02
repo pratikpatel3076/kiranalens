@@ -208,11 +208,18 @@ app.get("/api/stores/:id/score", async (req, res, next) => {
     // Record history entry + generate alert if score dropped significantly
     let alertText = null;
     if (cached && cached.score != null) {
-      alertText = await generateAlert(
-        store.storeName,
-        { score: cached.score, recommendation: cached.recommendation },
-        { score: result.score, recommendation: result.recommendation, factors: result.factors }
-      );
+      try {
+        alertText = await generateAlert(
+          store.storeName,
+          { score: cached.score, recommendation: cached.recommendation },
+          { score: result.score, recommendation: result.recommendation, factors: result.factors }
+        );
+      } catch (err) {
+        // Alert generation is a nicety, not part of the score. A Groq
+        // timeout/rate-limit must not fail the underwriting response.
+        console.error(`Alert generation failed for ${store.storeName}:`, err.message);
+        alertText = null;
+      }
     }
 
     doc.history = doc.history || [];
