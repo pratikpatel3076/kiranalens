@@ -13,7 +13,7 @@ when a store's financial health degrades — no formal credit history required.
 
 - Ingests 6–12 months of daily transaction data (synthetic generator, CSV, JSON, or Google Pay PDF export)
 - Runs two independent scoring paths: explainable rule-based engine + logistic regression ML model trained at boot
-- Streams an AI credit narrative via Groq (Llama 3.3 70B): lender brief, plain-language merchant explanation, and 3 specific improvement actions
+- Streams an AI credit narrative via Groq (openai/gpt-oss-120b): lender brief, plain-language merchant explanation, and 3 specific improvement actions
 - Automatically generates alerts when a store's score drops 8+ points between evaluations
 - Persists all scores, history, and alerts in MongoDB with fingerprint-based cache invalidation
 
@@ -23,7 +23,7 @@ when a store's financial health degrades — no formal credit history required.
 |---|---|
 | Backend | Node.js + Express (ESM), Mongoose + MongoDB |
 | ML | In-process logistic regression trained on synthetic stores at boot |
-| AI | Groq API — llama-3.3-70b-versatile — streaming SSE |
+| AI | Groq API — openai/gpt-oss-120b — streaming SSE |
 | Frontend | Single-file React dashboard (CDN, no build step) |
 | Infra | Docker Compose (Express + mongo:7) |
 
