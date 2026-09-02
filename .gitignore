@@ -1,3 +1,6 @@
 node_modules/
 .env
 *.log
+
+# Internal co-pilot context - never pushed
+CONTEXT.md
